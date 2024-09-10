@@ -1,6 +1,6 @@
 import torch as th
 import torch.distributions as D
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 th.set_printoptions(precision=2, sci_mode=False)
 
@@ -14,22 +14,36 @@ NR_VISITS_TOTAL_COUNT = 1.0
 class PopulationModel:
     intention: D.Beta
     is_client: D.Bernoulli
+    visits_total_count: float = field(default=NR_VISITS_TOTAL_COUNT)
     weights: th.nn.Parameter | None = None
+
+    def sample_without_discount(self, N):
+        intention = self.intention.sample((N, 1))
+        is_client = self.is_client.sample((N, 1))
+        # the number of visits should be correlated with the intention
+        visit_cnt = D.NegativeBinomial(th.tensor(self.visits_total_count), intention).sample()
+
+        return th.cat([intention, is_client, visit_cnt], dim=1)
+    
+    def sample_discount(self, agents, discount):
+        discounts = th.full([agents.shape[0], 1], discount)
+        return th.cat([agents, discounts], dim=1)
 
     def sample(self, discount, N):
         intention = self.intention.sample((N, 1))
         is_client = self.is_client.sample((N, 1))
         # the number of visits should be correlated with the intention
-        visit_cnt = D.NegativeBinomial(th.tensor(NR_VISITS_TOTAL_COUNT), intention).sample()
+        visit_cnt = D.NegativeBinomial(th.tensor(self.visits_total_count), intention).sample()
         discount = th.full_like(visit_cnt, discount)
 
         return th.cat([intention, is_client, visit_cnt, discount], dim=1)
 
     @classmethod
-    def init(cls):
+    def init(cls, alpha=BUY_INTENTION_CONCENTRATION1, beta=BUY_INTENTION_CONCENTRATION2, probs_client=PROBABILITY_CLIENT, visits_total_count=NR_VISITS_TOTAL_COUNT):
         return cls(
-            D.Beta(th.tensor(BUY_INTENTION_CONCENTRATION1), th.tensor(BUY_INTENTION_CONCENTRATION2)),  # 0.2 intention on average
-            D.Bernoulli(probs=th.tensor(PROBABILITY_CLIENT)),  # assume 1/4 visitors are clients
+            intention = D.Beta(th.tensor(alpha), th.tensor(beta)),  # 0.2 intention on average
+            is_client = D.Bernoulli(probs=th.tensor(probs_client)),  # assume 1/4 visitors are clients
+            visits_total_count = visits_total_count
         )
     
     def load_weights(self, file_path):

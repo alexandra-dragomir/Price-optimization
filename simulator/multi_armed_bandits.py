@@ -71,12 +71,21 @@ class UCB:
         self.values[chosen_arm] = new_value
 
 
-def orders_and_rate_per_day(pop_dist, discount_sample, fixed_agents=True, nr_agents=NR_AGENTS):
-    if fixed_agents:
+def orders_and_rate_per_day(pop_dist, discount_sample, same_agents=False, agents=[], fixed_nr_agents=True, nr_agents=NR_AGENTS, mean_agents=NR_AGENTS_MEAN, std_agents=NR_AGENTS_STD):
+    if same_agents:
+        # print(agents, type(agents))
+        if agents.shape[0] > 0:
+            agents_with_discount = pop_dist.sample_discount(agents, discount_sample)
+            result = pop_dist.act(agents_with_discount)
+            return float(th.sum(result)), float(result.mean())
+        else:
+            raise ValueError("No agents in the input. Generate agents and pass them in the 'agents' parameter.")
+    
+    if fixed_nr_agents:
         agents = pop_dist.sample(discount_sample, nr_agents)
 
     else:
-        nr_agents_distribution = D.Normal(NR_AGENTS_MEAN, NR_AGENTS_STD)
+        nr_agents_distribution = D.Normal(mean_agents, std_agents)
 
         nr_agents = int(nr_agents_distribution.sample())
         agents = pop_dist.sample(discount_sample, nr_agents)
@@ -85,9 +94,9 @@ def orders_and_rate_per_day(pop_dist, discount_sample, fixed_agents=True, nr_age
 
     return float(th.sum(result)), float(result.mean())
 
-def simulate(population_model, algorithm='epsilon_greedy', discounts=[0.3, 0.5, 0.8],  n_days=10, epsilon=0.1, reward='orders'):
+def simulate(population_model, same_agents=False, agents=[], fixed_nr_agents=True, nr_agents=NR_AGENTS, mean_agents=NR_AGENTS_MEAN, std_agents=NR_AGENTS_STD, algorithm='epsilon_greedy', discounts=[0.3, 0.5, 0.8],  n_days=10, epsilon=0.1, reward='orders', product_price=PROUDCT_PRICE):
     n_arms = len(discounts)
-    # discounts = [0.3, 0.5, 0.8]  
+
     if algorithm == 'epsilon_greedy':
         mab = EpsilonGreedy(n_arms, epsilon)
     elif algorithm == 'random':
@@ -101,8 +110,11 @@ def simulate(population_model, algorithm='epsilon_greedy', discounts=[0.3, 0.5, 
         chosen_arm = mab.select_arm()
         discount = discounts[chosen_arm]
 
-        # Simulate the buying process
-        orders, rate = orders_and_rate_per_day(population_model, discount)
+        # simulate the buying process
+        if same_agents:
+            orders, rate = orders_and_rate_per_day(population_model, discount, same_agents=True, agents=agents)
+        else:
+            orders, rate = orders_and_rate_per_day(population_model, discount, same_agents=False, fixed_nr_agents=fixed_nr_agents, nr_agents=nr_agents, mean_agents=mean_agents, std_agents=std_agents)
 
         if reward == 'orders':
             mab.update(chosen_arm, orders)
@@ -111,7 +123,7 @@ def simulate(population_model, algorithm='epsilon_greedy', discounts=[0.3, 0.5, 
             mab.update(chosen_arm, rate)
             rewards_per_day[day] = rate
         elif reward == 'profit':
-            profit = orders * (1 - discount) * PROUDCT_PRICE
+            profit = orders * (1 - discount) * product_price
             mab.update(chosen_arm, profit)
             rewards_per_day[day] = profit
         # print(f"Rewards day {day}: {reward} for discount {discount}")
